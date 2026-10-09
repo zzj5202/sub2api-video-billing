@@ -1,0 +1,12 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements_xyq.txt .
+RUN pip install --no-cache-dir -r requirements_xyq.txt
+
+COPY xyq_proxy.py .
+
+EXPOSE 8081
+
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:8081", "--timeout", "600", "xyq_proxy:app"]
