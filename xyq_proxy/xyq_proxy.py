@@ -40,19 +40,15 @@ def submit_run(message, video_model=None, resolution=None, duration_sec=None, ra
         "agent_name": "pippit_video_part_agent",
     }
     # 传递视频参数（分辨率、时长、比例），确保使用沉浸式短片而非全能创作
-    video_part_tool_param = {}
-    if video_model:
-        video_part_tool_param["model"] = video_model
-    if resolution:
-        video_part_tool_param["resolution"] = resolution
-    if duration_sec:
-        video_part_tool_param["duration_sec"] = duration_sec
-    if ratio:
-        video_part_tool_param["ratio"] = ratio
-    if message:
-        video_part_tool_param["prompt"] = message
-    if video_part_tool_param:
-        body["video_part_tool_param"] = video_part_tool_param
+    # ratio 是必填字段，缺失时默认 16:9
+    video_part_tool_param = {
+        "model": video_model or "seedance2.0_fast_vision",
+        "resolution": resolution or "480p",
+        "duration_sec": duration_sec or 5,
+        "ratio": ratio or "16:9",
+        "prompt": message,
+    }
+    body["video_part_tool_param"] = video_part_tool_param
 
     resp = requests.post(
         f"{XYQ_BASE_URL}/skill/submit_run",
