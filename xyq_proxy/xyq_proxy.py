@@ -33,11 +33,27 @@ def get_xyq_headers():
 def log_request():
     logging.info(f"REQUEST: {request.method} {request.path} | Body: {request.get_data(as_text=True)[:200]}")
 
-def submit_run(message, video_model=None):
-    body = {"message": message}
+def submit_run(message, video_model=None, resolution=None, duration_sec=None, ratio=None):
+    # 使用沉浸式短片视频 agent
+    body = {
+        "message": message,
+        "agent_name": "pippit_video_part_agent",
+    }
+    # 传递视频参数（分辨率、时长、比例），确保使用沉浸式短片而非全能创作
+    video_part_tool_param = {}
     if video_model:
-        body["video_model"] = video_model
-    
+        video_part_tool_param["model"] = video_model
+    if resolution:
+        video_part_tool_param["resolution"] = resolution
+    if duration_sec:
+        video_part_tool_param["duration_sec"] = duration_sec
+    if ratio:
+        video_part_tool_param["ratio"] = ratio
+    if message:
+        video_part_tool_param["prompt"] = message
+    if video_part_tool_param:
+        body["video_part_tool_param"] = video_part_tool_param
+
     resp = requests.post(
         f"{XYQ_BASE_URL}/skill/submit_run",
         headers=get_xyq_headers(),
@@ -47,7 +63,7 @@ def submit_run(message, video_model=None):
     data = resp.json()
     if data.get("ret") != "0":
         raise Exception(f"submit_run failed: {data.get('errmsg')}")
-    
+
     run = data["data"]["run"]
     return run["run_id"], run["thread_id"]
 
@@ -225,8 +241,8 @@ def chat_completions():
     
     def generate_video():
         try:
-            run_id, thread_id = submit_run(prompt, video_model)
-            logging.info(f"Task submitted: run_id={run_id}")
+            run_id, thread_id = submit_run(prompt, video_model, resolution=body.get("resolution"), duration_sec=duration_sec, ratio=body.get("ratio"))
+            logging.info(f"Task submitted: run_id={run_id}, resolution={body.get('resolution')}, duration={duration_sec}s")
             
             # 发送开始事件
             if stream:
