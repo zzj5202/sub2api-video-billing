@@ -73,36 +73,52 @@ def get_thread(run_id, thread_id):
     data = resp.json()
     if data.get("ret") != "0":
         raise Exception(f"get_thread failed: {data.get('errmsg')}")
-    return data["data"]["thread"]
+    thread_data = data.get("data")
+    if not thread_data or not isinstance(thread_data, dict):
+        raise Exception(f"get_thread returned empty data: {data}")
+    return thread_data.get("thread") or {}
 
 def extract_video_url(thread):
-    for run in thread.get("run_list", []):
-        for entry in run.get("entry_list", []):
+    for run in thread.get("run_list", []) or []:
+        for entry in run.get("entry_list", []) or []:
             artifact = entry.get("artifact")
-            if artifact:
-                for content in artifact.get("content", []):
-                    if content.get("sub_type") == "biz/x_data_video":
-                        try:
-                            video_data = json.loads(content["data"])
-                            video = video_data.get("video", {})
-                            url = video.get("url") or video.get("download_url")
-                            if url:
-                                return {
-                                    "url": url,
-                                    "cover_url": video.get("cover_url"),
-                                    "width": video.get("width"),
-                                    "height": video.get("height"),
-                                    "duration_ms": video.get("metadata", {}).get("duration_ms", 0)
-                                }
-                        except:
-                            pass
+            if not artifact:
+                continue
+            for content in artifact.get("content", []) or []:
+                if not isinstance(content, dict):
+                    continue
+                if content.get("sub_type") == "biz/x_data_video":
+                    try:
+                        video_data = json.loads(content.get("data", "{}"))
+                        if not isinstance(video_data, dict):
+                            continue
+                        video = video_data.get("video") or {}
+                        if not isinstance(video, dict):
+                            continue
+                        url = video.get("url") or video.get("download_url")
+                        if url:
+                            metadata = video.get("metadata") or {}
+                            return {
+                                "url": url,
+                                "cover_url": video.get("cover_url"),
+                                "width": video.get("width"),
+                                "height": video.get("height"),
+                                "duration_ms": (metadata or {}).get("duration_ms", 0) if isinstance(metadata, dict) else 0
+                            }
+                    except Exception as e:
+                        logging.debug(f"extract_video_url parse error: {e}")
+                        continue
     return None
 
 def wait_for_video(run_id, thread_id, timeout=300, poll_interval=10):
     start_time = time.time()
     while time.time() - start_time < timeout:
         thread = get_thread(run_id, thread_id)
-        run = thread["run_list"][0]
+        run_list = thread.get("run_list") or []
+        if not run_list:
+            time.sleep(poll_interval)
+            continue
+        run = run_list[0]
         state = run.get("state")
         
         if state == 3:
@@ -146,9 +162,16 @@ def chat_completions():
             return Response(sse_event(error), mimetype="text/event-stream")
         return jsonify(error), 400
     
+    # 从模型名中提取基础模型名（去掉分辨率后缀如 -480p/-720p/-1080p）
+    base_model = model
+    for suffix in ["-480p", "-720p", "-1080p", "-4k", "-2k"]:
+        if base_model.endswith(suffix):
+            base_model = base_model[:-len(suffix)]
+            break
+
     # 测试消息快速返回（不生成视频）
     test_messages = {"hi", "hello", "test", "测试", "你好", "ping"}
-    is_test = prompt.strip().lower() in test_messages or model not in MODEL_MAP
+    is_test = prompt.strip().lower() in test_messages or base_model not in MODEL_MAP
 
     # 从请求中提取视频时长（用于按秒计费：1秒 = 1000 tokens）
     duration_sec = body.get("duration") or body.get("duration_sec") or body.get("video_duration")
@@ -199,7 +222,7 @@ def chat_completions():
             return Response(generate(), mimetype="text/event-stream")
         return jsonify(resp_data), 200
     
-    video_model = MODEL_MAP.get(model, "seedance2.0_fast_vision")
+    video_model = MODEL_MAP.get(base_model, "seedance2.0_fast_vision")
     
     def wait_for_video_streaming(run_id, thread_id, timeout=600, poll_interval=10, keepalive_interval=15):
         """流式等待视频，定期发送 keep-alive 事件"""
@@ -207,7 +230,11 @@ def chat_completions():
         last_keepalive = time.time()
         while time.time() - start_time < timeout:
             thread = get_thread(run_id, thread_id)
-            run = thread["run_list"][0]
+            run_list = thread.get("run_list") or []
+            if not run_list:
+                time.sleep(poll_interval)
+                continue
+            run = run_list[0]
             state = run.get("state")
             
             if state == 3:
